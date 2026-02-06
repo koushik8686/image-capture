@@ -31,9 +31,11 @@ export default function DeviceB() {
     const [isUploading, setIsUploading] = useState(false);
     const [displayConnected, setDisplayConnected] = useState(false);
 
-    const fileInputRef = useRef<HTMLInputElement>(null);
     const { isConnected, emit, on, off } = useSocket();
     const deviceId = useRef(`camera_${Date.now()}`);
+
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const streamRef = useRef<MediaStream | null>(null);
 
     useEffect(() => {
         const loadCheckpoints = async () => {
@@ -75,29 +77,68 @@ export default function DeviceB() {
         };
     }, [on, off]);
 
-    // Auto-trigger camera when new image is received
+    // Start camera stream when waiting for capture
     useEffect(() => {
-        if (currentImage && !capturedFile && !capturedPreview) {
-            // Small delay to ensure render
-            setTimeout(() => {
-                fileInputRef.current?.click();
-            }, 500);
-        }
+        const startCamera = async () => {
+            if (currentImage && !capturedFile && !capturedPreview) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment' }
+                    });
+                    streamRef.current = stream;
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                    }
+                } catch (e) {
+                    console.error("Camera access denied or error:", e);
+                    alert("Unable to access camera. Please allow camera permissions.");
+                }
+            }
+        };
+
+        startCamera();
+
+        return () => {
+            // Cleanup stream
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+            }
+        };
     }, [currentImage, capturedFile, capturedPreview]);
+
+    const captureImage = () => {
+        if (!videoRef.current) return;
+
+        const video = videoRef.current;
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setCapturedPreview(dataUrl);
+
+        canvas.toBlob((blob) => {
+            if (blob) {
+                const file = new File([blob], "capture.jpg", { type: "image/jpeg" });
+                setCapturedFile(file);
+            }
+        }, 'image/jpeg', 0.85);
+
+        // Stop stream after capture
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+        }
+    };
 
     const connectToCheckpoint = () => {
         if (!selectedCheckpoint) return;
         emit('register_camera', { device_id: deviceId.current, checkpoint_name: selectedCheckpoint });
         setIsConnectedToCheckpoint(true);
-    };
-
-    const handleCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setCapturedFile(file);
-        const reader = new FileReader();
-        reader.onloadend = () => setCapturedPreview(reader.result as string);
-        reader.readAsDataURL(file);
     };
 
     const uploadSpoof = async () => {
@@ -130,7 +171,7 @@ export default function DeviceB() {
             if (!data.success) throw new Error(data.error);
             setCapturedFile(null);
             setCapturedPreview('');
-            if (fileInputRef.current) fileInputRef.current.value = '';
+            // No fileInputRef to reset
         } catch (e) {
             console.error(e);
             alert('Upload failed');
@@ -208,52 +249,60 @@ export default function DeviceB() {
                     </div>
                 ) : (
                     <div className="space-y-6 flex-1 flex flex-col">
-                        {capturedPreview ? (
-                            <div className="flex-1 flex flex-col">
-                                <div className="bg-[#161616] rounded-2xl p-4 border border-white/10 flex-1 flex flex-col mb-4">
-                                    <p className="text-xs font-bold text-white/30 uppercase tracking-wider mb-3">Your Capture</p>
-                                    <div className="flex-1 bg-black rounded-lg overflow-hidden flex items-center justify-center border border-white/5 relative">
-                                        <img src={capturedPreview} alt="Preview" className="max-h-full max-w-full object-contain absolute" />
-                                    </div>
-                                </div>
+                        {/* Camera Frame */}
+                        <div className="flex-1 flex flex-col items-center justify-center">
+                            <div className="w-full max-w-sm aspect-square bg-black rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl">
+                                {!capturedPreview ? (
+                                    <video
+                                        ref={videoRef}
+                                        autoPlay
+                                        playsInline
+                                        className="w-full h-full object-cover"
+                                    />
+                                ) : (
+                                    <img
+                                        src={capturedPreview}
+                                        alt="Preview"
+                                        className="w-full h-full object-cover"
+                                    />
+                                )}
 
+                                {/* Corner markers for aesthetics */}
+                                <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-white/50 rounded-tl-lg"></div>
+                                <div className="absolute top-4 right-4 w-4 h-4 border-t-2 border-r-2 border-white/50 rounded-tr-lg"></div>
+                                <div className="absolute bottom-4 left-4 w-4 h-4 border-b-2 border-l-2 border-white/50 rounded-bl-lg"></div>
+                                <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-white/50 rounded-br-lg"></div>
+                            </div>
+                        </div>
+
+                        {/* Bottom Controls */}
+                        <div className="pb-8 pt-4">
+                            {capturedPreview ? (
                                 <div className="grid grid-cols-2 gap-4">
                                     <button
                                         onClick={() => { setCapturedFile(null); setCapturedPreview(''); }}
-                                        className="py-4 rounded-xl bg-[#222] border border-white/10 font-medium hover:bg-[#333]"
+                                        className="py-4 rounded-xl bg-[#222] border border-white/10 font-medium hover:bg-[#333] transition-colors"
                                     >
                                         Retake
                                     </button>
                                     <button
                                         onClick={uploadSpoof}
                                         disabled={isUploading}
-                                        className="py-4 rounded-xl bg-white text-black font-medium hover:bg-gray-200"
+                                        className="py-4 rounded-xl bg-white text-black font-medium hover:bg-gray-200 transition-colors shadow-lg"
                                     >
                                         {isUploading ? 'Uploading...' : 'Confirm Upload'}
                                     </button>
                                 </div>
-                            </div>
-                        ) : (
-                            <div className="flex-1 flex flex-col justify-end">
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept="image/*"
-                                    capture="environment"
-                                    onChange={handleCapture}
-                                    className="hidden"
-                                />
+                            ) : (
                                 <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="w-full py-8 rounded-2xl bg-white text-black font-bold text-xl shadow-lg hover:bg-gray-100 active:scale-95 transition-all flex items-center justify-center gap-3"
+                                    onClick={captureImage}
+                                    className="w-full py-6 rounded-2xl bg-white text-black font-bold text-xl shadow-lg hover:bg-gray-100 active:scale-95 transition-all flex items-center justify-center gap-3"
                                 >
-                                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                                    </svg>
-                                    Capture Photo
+                                    <div className="w-6 h-6 border-4 border-black rounded-full"></div>
+                                    Capture Image
                                 </button>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

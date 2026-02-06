@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 
 // Use current window location for socket connection (works for both localhost and network)
 const getSocketUrl = () => {
-    return import.meta.env.VITE_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+    return import.meta.env.VITE_BACKEND_URL || undefined;
 };
 
 export function useSocket() {

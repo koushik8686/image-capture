@@ -6,11 +6,16 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    allowedHosts: true,
     port: 5173,
     host: true, // Enable network access
     proxy: {
-      '/api': 'http://localhost:3001',
-      '/images': 'http://localhost:3001',
+      '/api': 'https://political-cenogenetic-genevieve.ngrok-free.dev',
+      '/uploads': 'https://political-cenogenetic-genevieve.ngrok-free.dev', // Changed from images to uploads based on server.js static serve
+      '/socket.io': {
+        target: 'https://political-cenogenetic-genevieve.ngrok-free.dev',
+        ws: true
+      }
     }
   }
 })
